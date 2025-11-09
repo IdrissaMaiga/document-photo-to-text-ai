@@ -18,6 +18,14 @@ A powerful Node.js library for extracting text from various document formats usi
 npm install document-photo-to-text-ai
 ```
 
+[![npm version](https://badge.fury.io/js/document-photo-to-text-ai.svg)](https://badge.fury.io/js/document-photo-to-text-ai)
+[![npm downloads](https://img.shields.io/npm/dm/document-photo-to-text-ai.svg)](https://www.npmjs.com/package/document-photo-to-text-ai)
+
+**Package Status**: ✅ Published on npm registry  
+**Version**: 1.0.0  
+**License**: MIT  
+**Node.js**: >= 18.0.0
+
 ## Quick Start
 
 ```javascript
