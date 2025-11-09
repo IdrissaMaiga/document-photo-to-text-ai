@@ -241,7 +241,7 @@ async function runBufferTests(processor) {
 
 async function runComprehensiveTests() {
   // Check for API key
-  const apiKey = process.env.GOOGLE_API_KEY || 'AIzaSyA8Jx5B7zfTqbq7O9tohv8vDdIXfbXuN4g';
+  const apiKey = process.env.GOOGLE_API_KEY || 'YOUR_GOOGLE_API_KEY_HERE';
 
   if (apiKey === 'YOUR_GOOGLE_API_KEY_HERE') {
     console.log('⚠️  GOOGLE_API_KEY not set. Some tests may fail.');
