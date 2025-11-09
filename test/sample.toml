@@ -1,0 +1,27 @@
+[package]
+name = "sample-toml"
+version = "1.0.0"
+description = "A sample TOML file for testing document extraction"
+
+[content]
+title = "Testing TOML Extraction"
+description = "This is a sample TOML file to test the document processor's TOML parsing capabilities."
+
+[[content.items]]
+id = 1
+name = "Item One"
+value = "First item in the list"
+
+[[content.items]]
+id = 2
+name = "Item Two"
+value = "Second item in the list"
+
+[metadata]
+created = "2025-11-09"
+author = "Test Suite"
+
+[settings]
+debug = true
+timeout = 30
+retries = 3

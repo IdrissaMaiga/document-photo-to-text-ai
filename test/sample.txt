@@ -1,0 +1,4 @@
+This is a sample text file.
+It contains multiple lines of text.
+This can be used to test basic text extraction.
+The library should be able to read this file and extract all the text content.

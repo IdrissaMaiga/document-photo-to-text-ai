@@ -1,0 +1,38 @@
+🚀 Just released: document-photo-to-text-ai - The Ultimate Document Processing Tool for Developers!
+
+I'm excited to share my latest open-source project that combines AI-powered text extraction with MCP (Model Context Protocol) server capabilities. This npm package transforms how developers handle document processing!
+
+🔥 Key Features:
+• 40+ supported file formats (PDF, Word, Excel, images, code files, YouTube videos, and more)
+• Google Gemini AI integration for advanced OCR and text extraction
+• MCP server for seamless AI assistant integration
+• Built-in caching and comprehensive metadata
+• Node.js 18+ compatible with modern ES modules
+
+💡 Perfect for:
+• AI assistants that need to process documents
+• Content analysis and data extraction workflows
+• Document management systems
+• Research and data processing applications
+
+📦 Install now:
+npm install document-photo-to-text-ai
+
+🛠️ Quick start:
+```javascript
+import UniversalDocumentProcessor from 'document-photo-to-text-ai';
+
+const processor = new UniversalDocumentProcessor('YOUR_GOOGLE_API_KEY');
+const result = await processor.processDocument('./document.pdf');
+console.log(result.extracted_text);
+```
+
+🤖 MCP Integration:
+Configure with Claude Desktop or other MCP-compatible AI assistants to enable document processing capabilities directly in conversations!
+
+🔗 GitHub: https://github.com/IdrissaMaiga/document-photo-to-text-ai
+📧 Contact: maigadrisking@gmail.com
+
+What document processing challenges are you facing? Let's discuss in the comments!
+
+#AI #MachineLearning #NodeJS #OpenSource #DocumentProcessing #OCR #JavaScript #APIDevelopment #MCP #GoogleGemini #DeveloperTools

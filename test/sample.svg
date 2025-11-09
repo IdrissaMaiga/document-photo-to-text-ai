@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="200" height="100" xmlns="http://www.w3.org/2000/svg">
+  <rect width="200" height="100" fill="lightblue"/>
+  <text x="10" y="30" font-family="Arial" font-size="16" fill="black">Sample SVG Document</text>
+  <text x="10" y="50" font-family="Arial" font-size="12" fill="black">This SVG contains text elements</text>
+  <text x="10" y="70" font-family="Arial" font-size="12" fill="black">for testing text extraction.</text>
+</svg>

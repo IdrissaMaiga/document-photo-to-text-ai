@@ -1,0 +1,24 @@
+{
+  "name": "Sample Document",
+  "type": "test",
+  "content": {
+    "title": "Testing JSON Extraction",
+    "description": "This is a sample JSON file to test the document processor's JSON parsing capabilities.",
+    "items": [
+      {
+        "id": 1,
+        "name": "Item One",
+        "value": "First item in the list"
+      },
+      {
+        "id": 2,
+        "name": "Item Two",
+        "value": "Second item in the list"
+      }
+    ],
+    "metadata": {
+      "created": "2025-11-09",
+      "version": "1.0"
+    }
+  }
+}

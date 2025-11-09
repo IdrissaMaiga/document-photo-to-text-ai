@@ -1,0 +1,53 @@
+{
+  "name": "document-photo-to-text-ai",
+  "version": "1.0.0",
+  "description": "A universal document processor that extracts text from various file formats including PDFs, images, documents, and more using Google Gemini AI",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node run-tests.js",
+    "mcp-server": "node mcp-server.js"
+  },
+  "keywords": [
+    "document-processing",
+    "ocr",
+    "ai",
+    "text-extraction",
+    "pdf",
+    "image",
+    "word",
+    "excel",
+    "csv",
+    "html",
+    "json",
+    "xml",
+    "youtube",
+    "gemini",
+    "google-ai"
+  ],
+  "author": "Idriss Maiga <maigadrisking@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/IdrissaMaiga/document-photo-to-text-ai.git"
+  },
+  "bugs": {
+    "url": "https://github.com/IdrissaMaiga/document-photo-to-text-ai/issues"
+  },
+  "homepage": "https://github.com/IdrissaMaiga/document-photo-to-text-ai#readme",
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@modelcontextprotocol/sdk": "^1.21.1",
+    "cheerio": "^1.0.0-rc.12",
+    "csv-parser": "^3.0.0",
+    "mammoth": "^1.6.0",
+    "mime-types": "^2.1.35",
+    "pdf-parse": "^1.1.1",
+    "xlsx": "^0.18.5",
+    "youtube-captions-scraper": "^2.0.3",
+    "ytdl-core": "^4.11.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

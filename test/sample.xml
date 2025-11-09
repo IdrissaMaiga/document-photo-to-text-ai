@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document>
+  <title>Sample XML Document</title>
+  <description>This is a sample XML file to test XML text extraction capabilities.</description>
+  <content>
+    <section id="1">
+      <heading>First Section</heading>
+      <paragraph>This paragraph contains sample text for testing XML parsing.</paragraph>
+    </section>
+    <section id="2">
+      <heading>Second Section</heading>
+      <paragraph>Another paragraph with different content to test extraction.</paragraph>
+    </section>
+  </content>
+  <metadata>
+    <created>2025-11-09</created>
+    <version>1.0</version>
+  </metadata>
+</document>
