@@ -1,5 +1,10 @@
 # Document Photo to Text AI
 
+![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=nodedotjs&logoColor=white)
+![npm](https://img.shields.io/badge/npm-CB3837?style=flat-square&logo=npm&logoColor=white)
+![Google Gemini](https://img.shields.io/badge/Gemini_AI-4285F4?style=flat-square&logo=google&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
+
 A powerful Node.js library for extracting text from various document formats using Google Gemini AI and specialized parsers. Supports PDFs, images, Word documents, Excel spreadsheets, CSV files, HTML pages, YouTube videos, and more.
 
 ## Features
