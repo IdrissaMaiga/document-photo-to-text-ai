@@ -1,6 +1,6 @@
 {
   "name": "document-photo-to-text-ai",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "A universal document processor that extracts text from various file formats including PDFs, images, documents, and more. Supports multiple AI providers: Gemini, OpenAI, Anthropic Claude",
   "main": "index.js",
   "type": "module",
