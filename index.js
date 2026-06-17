@@ -8,8 +8,7 @@ import { URL } from 'url';
 import { Readable } from 'stream';
 
 // Document processing libraries
-import pkg from 'pdf-parse';
-const { pdf: pdfParse } = pkg;
+import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 import xlsx from 'xlsx';
 import csv from 'csv-parser';
@@ -17,22 +16,140 @@ import * as cheerio from 'cheerio';
 import ytdl from 'ytdl-core';
 import { getSubtitles } from 'youtube-captions-scraper';
 
-// Google Generative AI
-import { GoogleGenerativeAI } from '@google/generative-ai';
+async function createAIProvider(config) {
+  if (!config) return null;
+
+  const { provider, apiKey, model, baseURL } = config;
+
+  if (typeof provider === 'function') {
+    return { name: 'custom', generateContent: provider };
+  }
+
+  switch (provider) {
+    case 'gemini': {
+      let GoogleGenerativeAI;
+      try {
+        const mod = await import('@google/generative-ai');
+        GoogleGenerativeAI = mod.GoogleGenerativeAI;
+      } catch {
+        throw new Error('Gemini provider requires "@google/generative-ai". Install it with: npm install @google/generative-ai');
+      }
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const aiModel = genAI.getGenerativeModel({ model: model || 'gemini-2.5-flash' });
+      return {
+        name: 'gemini',
+        async generateContent(prompt, inlineData) {
+          const parts = [prompt];
+          if (inlineData) {
+            parts.push({ inlineData: { data: inlineData.data, mimeType: inlineData.mimeType } });
+          }
+          const result = await aiModel.generateContent(parts);
+          return result.response.text();
+        }
+      };
+    }
+
+    case 'openai': {
+      let OpenAI;
+      try {
+        const mod = await import('openai');
+        OpenAI = mod.default || mod.OpenAI;
+      } catch {
+        throw new Error('OpenAI provider requires "openai". Install it with: npm install openai');
+      }
+      const client = new OpenAI({ apiKey, ...(baseURL && { baseURL }) });
+      const modelName = model || 'gpt-4o';
+      return {
+        name: 'openai',
+        async generateContent(prompt, inlineData) {
+          const content = [{ type: 'text', text: prompt }];
+          if (inlineData) {
+            content.push({
+              type: 'image_url',
+              image_url: { url: `data:${inlineData.mimeType};base64,${inlineData.data}` }
+            });
+          }
+          const result = await client.chat.completions.create({
+            model: modelName,
+            messages: [{ role: 'user', content }]
+          });
+          return result.choices[0].message.content;
+        }
+      };
+    }
+
+    case 'anthropic': {
+      let Anthropic;
+      try {
+        const mod = await import('@anthropic-ai/sdk');
+        Anthropic = mod.default || mod.Anthropic;
+      } catch {
+        throw new Error('Anthropic provider requires "@anthropic-ai/sdk". Install it with: npm install @anthropic-ai/sdk');
+      }
+      const client = new Anthropic({ apiKey });
+      const modelName = model || 'claude-sonnet-4-20250514';
+      return {
+        name: 'anthropic',
+        async generateContent(prompt, inlineData) {
+          const content = [];
+          if (inlineData) {
+            const mt = inlineData.mimeType.toLowerCase();
+            if (mt.startsWith('image/')) {
+              content.push({
+                type: 'image',
+                source: { type: 'base64', media_type: mt, data: inlineData.data }
+              });
+            } else if (mt === 'application/pdf') {
+              content.push({
+                type: 'document',
+                source: { type: 'base64', media_type: mt, data: inlineData.data }
+              });
+            } else {
+              throw new Error(`Anthropic does not support inline ${mt} content`);
+            }
+          }
+          content.push({ type: 'text', text: prompt });
+          const result = await client.messages.create({
+            model: modelName,
+            max_tokens: 4096,
+            messages: [{ role: 'user', content }]
+          });
+          return result.content[0].text;
+        }
+      };
+    }
+
+    default:
+      throw new Error(`Unknown AI provider: "${provider}". Supported: gemini, openai, anthropic, or pass a custom function.`);
+  }
+}
 
 class UniversalDocumentProcessor {
-  constructor(googleApiKey, options = {}) {
-    this.genAI = new GoogleGenerativeAI(googleApiKey);
-    // Initialize the model - using Gemini 2.5 Flash for fast OCR fallback
-    this.model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-    
+  /**
+   * @param {string|object|function} [config] - Google API key (string, backward compat), provider config object, or custom AI function
+   *   Config object: { provider: 'gemini'|'openai'|'anthropic'|Function, apiKey: string, model?: string, baseURL?: string }
+   * @param {object} [options] - Processing options: maxFileSize, timeout, cacheEnabled
+   */
+  constructor(config, options = {}) {
+    if (typeof config === 'string') {
+      this._providerConfig = { provider: 'gemini', apiKey: config };
+    } else if (typeof config === 'function') {
+      this._providerConfig = { provider: config };
+    } else if (typeof config === 'object' && config !== null) {
+      this._providerConfig = config;
+    } else {
+      this._providerConfig = null;
+    }
+
+    this._aiProvider = null;
+
     this.options = {
-      maxFileSize: options.maxFileSize || 20 * 1024 * 1024, // 20MB
-      timeout: options.timeout || 30000, // 30 seconds
+      maxFileSize: options.maxFileSize || 20 * 1024 * 1024,
+      timeout: options.timeout || 30000,
       cacheEnabled: options.cacheEnabled !== false,
       ...options
     };
-    
+
     this.cache = new Map();
     this.supportedFormats = {
       // Documents
@@ -40,12 +157,12 @@ class UniversalDocumentProcessor {
       'docx': this.processWord.bind(this),
       'doc': this.processWordLegacy.bind(this),
       'txt': this.processText.bind(this),
-      'rtf': this.processWithGemini.bind(this),
-      
+      'rtf': this.processWithAI.bind(this),
+
       // Presentations
       'pptx': this.processPowerPoint.bind(this),
       'ppt': this.processPowerPoint.bind(this),
-      
+
       // Data formats
       'json': this.processJSON.bind(this),
       'xml': this.processXML.bind(this),
@@ -57,7 +174,7 @@ class UniversalDocumentProcessor {
       'ini': this.processText.bind(this),
       'conf': this.processText.bind(this),
       'log': this.processText.bind(this),
-      
+
       // Code files
       'js': this.processText.bind(this),
       'ts': this.processText.bind(this),
@@ -71,12 +188,12 @@ class UniversalDocumentProcessor {
       'go': this.processText.bind(this),
       'rs': this.processText.bind(this),
       'sql': this.processText.bind(this),
-      
+
       // Spreadsheets
       'xlsx': this.processExcel.bind(this),
       'xls': this.processExcel.bind(this),
       'csv': this.processCSV.bind(this),
-      
+
       // Images
       'png': this.processImage.bind(this),
       'jpg': this.processImage.bind(this),
@@ -86,37 +203,42 @@ class UniversalDocumentProcessor {
       'bmp': this.processImage.bind(this),
       'tiff': this.processImage.bind(this),
       'svg': this.processSVG.bind(this),
-      
+
       // Web content
       'html': this.processHTML.bind(this),
       'htm': this.processHTML.bind(this)
     };
   }
 
-  /**
-   * Main processing function - handles any file, URL, or buffer
-   * @param {string|Buffer} input - File path, URL, YouTube URL, or Buffer
-   * @param {Object} options - Options for buffer processing (filename, mimetype)
-   * @returns {Promise<Object>} Structured output with file metadata and extracted text
-   */
+  async _getAIProvider() {
+    if (this._aiProvider) return this._aiProvider;
+    if (!this._providerConfig) return null;
+    this._aiProvider = await createAIProvider(this._providerConfig);
+    return this._aiProvider;
+  }
+
+  async _aiGenerateContent(prompt, inlineData) {
+    const provider = await this._getAIProvider();
+    if (!provider) {
+      throw new Error('No AI provider configured. Pass a provider config to the constructor or use: new UniversalDocumentProcessor({ provider: "gemini", apiKey: "..." })');
+    }
+    return provider.generateContent(prompt, inlineData);
+  }
+
   async processDocument(input, options = {}) {
     try {
-      // Handle buffer input
       if (Buffer.isBuffer(input)) {
         return await this.processBuffer(input, options);
       }
 
-      // Generate hash for caching
       const inputHash = crypto.createHash('md5').update(input).digest('hex');
-      
-      // Check cache
+
       if (this.options.cacheEnabled && this.cache.has(inputHash)) {
         return this.cache.get(inputHash);
       }
 
       let result;
-      
-      // Determine input type and process accordingly
+
       if (this.isYouTubeURL(input)) {
         result = await this.processYouTube(input);
       } else if (this.isURL(input)) {
@@ -125,7 +247,6 @@ class UniversalDocumentProcessor {
         result = await this.processLocalFile(input);
       }
 
-      // Cache result
       if (this.options.cacheEnabled && result) {
         this.cache.set(inputHash, result);
       }
@@ -141,30 +262,21 @@ class UniversalDocumentProcessor {
         file_url: this.isURL(input) ? input : null,
         file_hash: null,
         metadata: { error: error.message },
-        extracted_text: null
+        extracted_text: ''
       };
     }
   }
 
-  /**
-   * Process buffer directly
-   * @param {Buffer} buffer - File buffer
-   * @param {Object} options - Options containing filename and mimetype
-   * @returns {Promise<Object>} Structured output with file metadata and extracted text
-   */
   async processBuffer(buffer, options = {}) {
     try {
       const { filename = 'unknown', mimetype = 'application/octet-stream' } = options;
-      
-      // Generate hash
+
       const fileHash = crypto.createHash('sha256').update(buffer).digest('hex');
-      
-      // Get file extension from filename
-      const fileExtension = filename.includes('.') ? 
-        filename.split('.').pop().toLowerCase() : 
+
+      const fileExtension = filename.includes('.') ?
+        filename.split('.').pop().toLowerCase() :
         'unknown';
-      
-      // Check file size
+
       if (buffer.length > this.options.maxFileSize) {
         throw new Error(`File too large: ${buffer.length} bytes (max: ${this.options.maxFileSize})`);
       }
@@ -176,9 +288,8 @@ class UniversalDocumentProcessor {
         file_extension: fileExtension
       };
 
-      // Get processor for file type
       const processor = this.supportedFormats[fileExtension];
-      
+
       if (processor) {
         try {
           const processed = await processor(null, buffer);
@@ -186,28 +297,25 @@ class UniversalDocumentProcessor {
           metadata = { ...metadata, ...processed.metadata };
         } catch (processorError) {
           console.warn(`Processor failed for ${fileExtension}, falling back to text processing:`, processorError.message);
-          // Fallback to text processing instead of Gemini
           const textProcessed = await this.processText(null, buffer);
           extractedText = textProcessed.text || '';
           metadata = { ...metadata, ...textProcessed.metadata, fallback_reason: 'processor_failed' };
         }
       } else {
-        // For unknown file types, try to process as text first before falling back to Gemini
         if (this.isTextLikeContent(buffer)) {
           console.log(`No specific processor for ${fileExtension}, treating as text`);
           const textProcessed = await this.processText(null, buffer);
           extractedText = textProcessed.text || '';
           metadata = { ...metadata, ...textProcessed.metadata, processing_method: 'text_fallback' };
         } else {
-          // Only use Gemini for binary/non-text content with supported mime types
-          if (this.isGeminiSupportedMimeType(mimetype)) {
+          if (this.isAISupportedMimeType(mimetype)) {
             try {
-              extractedText = await this.processWithGeminiBuffer(buffer, mimetype);
-            } catch (geminiError) {
-              console.warn(`Gemini processing failed, treating as text:`, geminiError.message);
+              extractedText = await this.processWithAIBuffer(buffer, mimetype);
+            } catch (aiError) {
+              console.warn(`AI processing failed, treating as text:`, aiError.message);
               const textProcessed = await this.processText(null, buffer);
               extractedText = textProcessed.text || '';
-              metadata = { ...metadata, ...textProcessed.metadata, fallback_reason: 'gemini_failed' };
+              metadata = { ...metadata, ...textProcessed.metadata, fallback_reason: 'ai_failed' };
             }
           } else {
             console.log(`Unsupported mime type ${mimetype}, treating as text`);
@@ -218,12 +326,11 @@ class UniversalDocumentProcessor {
         }
       }
 
-      // Sanitize extracted text to remove problematic characters
       const sanitizeText = (text) => {
         if (!text || typeof text !== 'string') return '';
         return text
-          .replace(/\u0000/g, '') // Remove null characters
-          .replace(/[\u0001-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, '') // Remove other control characters
+          .replace(/ /g, '')
+          .replace(/[---]/g, '')
           .trim();
       };
 
@@ -247,7 +354,7 @@ class UniversalDocumentProcessor {
         file_size: buffer ? buffer.length : 0,
         file_url: null,
         file_hash: null,
-        metadata: { 
+        metadata: {
           error: error.message,
           original_name: options.filename || 'unknown'
         },
@@ -256,50 +363,35 @@ class UniversalDocumentProcessor {
     }
   }
 
-  /**
-   * Check if buffer content appears to be text-like
-   * @param {Buffer} buffer - Buffer to check
-   * @returns {boolean} True if content appears to be text
-   */
   isTextLikeContent(buffer) {
     if (!buffer || buffer.length === 0) return false;
-    
-    // Sample first 1KB of content
+
     const sampleSize = Math.min(1024, buffer.length);
     const sample = buffer.slice(0, sampleSize);
-    
+
     let textBytes = 0;
     let nullBytes = 0;
-    
+
     for (let i = 0; i < sample.length; i++) {
       const byte = sample[i];
-      
-      // Count null bytes (strong indicator of binary)
+
       if (byte === 0) {
         nullBytes++;
       }
-      
-      // Count printable ASCII and common UTF-8 chars
-      if ((byte >= 32 && byte <= 126) || // Printable ASCII
-          byte === 9 || byte === 10 || byte === 13 || // Tab, LF, CR
-          (byte >= 128 && byte <= 255)) { // Extended ASCII/UTF-8
+
+      if ((byte >= 32 && byte <= 126) ||
+          byte === 9 || byte === 10 || byte === 13 ||
+          (byte >= 128 && byte <= 255)) {
         textBytes++;
       }
     }
-    
-    // If more than 5% null bytes, likely binary
+
     if (nullBytes / sample.length > 0.05) return false;
-    
-    // If more than 80% appears to be text characters, treat as text
+
     return (textBytes / sample.length) > 0.8;
   }
 
-  /**
-   * Check if mime type is supported by Gemini
-   * @param {string} mimetype - MIME type to check
-   * @returns {boolean} True if Gemini supports this mime type
-   */
-  isGeminiSupportedMimeType(mimetype) {
+  isAISupportedMimeType(mimetype) {
     const supportedTypes = [
       'image/jpeg',
       'image/png',
@@ -328,13 +420,10 @@ class UniversalDocumentProcessor {
       'text/javascript',
       'application/x-javascript'
     ];
-    
+
     return supportedTypes.includes(mimetype.toLowerCase());
   }
 
-  /**
-   * Process local file
-   */
   async processLocalFile(filePath) {
     if (!fs.existsSync(filePath)) {
       throw new Error(`File not found: ${filePath}`);
@@ -342,7 +431,7 @@ class UniversalDocumentProcessor {
 
     const stats = fs.statSync(filePath);
     const fileSize = stats.size;
-    
+
     if (fileSize > this.options.maxFileSize) {
       throw new Error(`File too large: ${fileSize} bytes (max: ${this.options.maxFileSize})`);
     }
@@ -360,7 +449,8 @@ class UniversalDocumentProcessor {
       modified: stats.mtime
     };
 
-    // Process based on file type
+    const effectiveMimeType = mimeType || 'application/octet-stream';
+
     if (this.supportedFormats[fileExtension]) {
       try {
         const processor = this.supportedFormats[fileExtension];
@@ -368,13 +458,11 @@ class UniversalDocumentProcessor {
         extractedText = processed.text || '';
         metadata = { ...metadata, ...processed.metadata };
       } catch (error) {
-        // Fallback to Gemini AI
-        console.warn(`Standard processor failed for ${fileExtension}, trying Gemini AI`);
-        extractedText = await this.processWithGeminiBuffer(fileBuffer, mimeType);
+        console.warn(`Standard processor failed for ${fileExtension}, trying AI fallback`);
+        extractedText = await this.processWithAIBuffer(fileBuffer, effectiveMimeType);
       }
     } else {
-      // Use Gemini AI for unsupported formats
-      extractedText = await this.processWithGeminiBuffer(fileBuffer, mimeType);
+      extractedText = await this.processWithAIBuffer(fileBuffer, effectiveMimeType);
     }
 
     return {
@@ -413,7 +501,6 @@ class UniversalDocumentProcessor {
             chunks.push(chunk);
             totalSize += chunk.length;
 
-            // Check size limit
             if (totalSize > this.options.maxFileSize) {
               req.destroy();
               reject(new Error(`File too large: ${totalSize} bytes (max: ${this.options.maxFileSize})`));
@@ -428,9 +515,8 @@ class UniversalDocumentProcessor {
               const fileSize = buffer.length;
               const fileHash = crypto.createHash('sha256').update(buffer).digest('hex');
 
-              // Determine file type from URL or content type
               const urlPath = urlObj.pathname;
-              const fileExtension = path.extname(urlPath).toLowerCase().substring(1) || 
+              const fileExtension = path.extname(urlPath).toLowerCase().substring(1) ||
                                    this.getExtensionFromMimeType(contentType);
 
               let extractedText = '';
@@ -440,13 +526,12 @@ class UniversalDocumentProcessor {
                 response_status: res.statusCode
               };
 
-              // Process based on content type or extension
               if (contentType.startsWith('text/html')) {
                 const processed = await this.processHTMLBuffer(buffer);
                 extractedText = processed.text;
                 metadata = { ...metadata, ...processed.metadata };
               } else if (contentType.startsWith('image/')) {
-                extractedText = await this.processImageBuffer(buffer, contentType);
+                extractedText = await this.processImageBuffer(buffer, contentType.split(';')[0].trim());
               } else if (contentType.includes('pdf')) {
                 const processed = await this.processPDFBuffer(buffer);
                 extractedText = processed.text;
@@ -457,12 +542,11 @@ class UniversalDocumentProcessor {
                 extractedText = processed.text || '';
                 metadata = { ...metadata, ...processed.metadata };
               } else {
-                // Fallback to Gemini AI
-                extractedText = await this.processWithGeminiBuffer(buffer, contentType);
+                extractedText = await this.processWithAIBuffer(buffer, contentType || 'application/octet-stream');
               }
 
               resolve({
-                file_type: fileExtension || this.getFileTypeFromMimeType(contentType),
+                file_type: fileExtension || this.getFileTypeFromMimeType(contentType || 'application/octet-stream'),
                 mime_type: contentType || null,
                 file_size: fileSize,
                 file_url: url,
@@ -492,9 +576,6 @@ class UniversalDocumentProcessor {
     });
   }
 
-  /**
-   * Process YouTube video (extract transcript)
-   */
   async processYouTube(url) {
     try {
       const videoId = this.extractYouTubeId(url);
@@ -502,7 +583,6 @@ class UniversalDocumentProcessor {
         throw new Error('Invalid YouTube URL');
       }
 
-      // Try to get captions/subtitles
       let extractedText = '';
       let metadata = {
         video_id: videoId,
@@ -511,20 +591,18 @@ class UniversalDocumentProcessor {
       };
 
       try {
-        // Try to get video info
         const info = await ytdl.getInfo(videoId);
         metadata.title = info.videoDetails.title;
         metadata.description = info.videoDetails.description;
         metadata.duration = info.videoDetails.lengthSeconds;
         metadata.view_count = info.videoDetails.viewCount;
 
-        // Try to get subtitles
         try {
           const captions = await getSubtitles({
             videoID: videoId,
             lang: 'en'
           });
-          
+
           if (captions && captions.length > 0) {
             extractedText = captions.map(caption => caption.text).join(' ');
           }
@@ -532,14 +610,12 @@ class UniversalDocumentProcessor {
           console.warn('Could not extract captions:', captionError.message);
         }
 
-        // If no captions, use description
         if (!extractedText && metadata.description) {
           extractedText = `Title: ${metadata.title}\n\nDescription: ${metadata.description}`;
         }
 
       } catch (error) {
         console.warn('Could not get video info:', error.message);
-        // Return empty text on failure
         extractedText = "";
         metadata.extraction_status = 'failed';
         metadata.extraction_error = error.message;
@@ -563,12 +639,10 @@ class UniversalDocumentProcessor {
   // Document processors
   async processPDF(filePath, buffer) {
     const data = buffer || fs.readFileSync(filePath);
-    
+
     try {
-      // Primary method: pdf-parse
       const parsed = await pdfParse(data);
-      
-      // Check if we got meaningful text
+
       if (parsed.text && parsed.text.trim().length > 0) {
         return {
           text: parsed.text,
@@ -580,45 +654,41 @@ class UniversalDocumentProcessor {
           }
         };
       }
-      
-      // If no text extracted, this might be an image-based PDF
-      console.log('PDF-parse extracted no text, trying Gemini AI for OCR...');
-      
-      // Fallback: Use Gemini AI for OCR on image-based PDFs
-      const geminiText = await this.processWithGeminiBuffer(data, 'application/pdf');
-      
+
+      console.log('PDF-parse extracted no text, trying AI for OCR...');
+
+      const aiText = await this.processWithAIBuffer(data, 'application/pdf');
+
       return {
-        text: geminiText || '',
+        text: aiText || '',
         metadata: {
           pages: parsed.numpages || 'unknown',
           info: parsed.info || {},
-          processing_method: 'gemini_ocr',
-          text_length: geminiText?.length || 0,
-          note: 'Processed with Gemini OCR (likely image-based PDF)'
+          processing_method: 'ai_ocr',
+          text_length: aiText?.length || 0,
+          note: 'Processed with AI OCR (likely image-based PDF)'
         }
       };
-      
+
     } catch (pdfError) {
-      console.log(`PDF-parse failed (${pdfError.message}), trying Gemini AI...`);
-      
-      // Fallback to Gemini AI if pdf-parse fails
+      console.log(`PDF-parse failed (${pdfError.message}), trying AI...`);
+
       try {
-        const geminiText = await this.processWithGeminiBuffer(data, 'application/pdf');
-        
+        const aiText = await this.processWithAIBuffer(data, 'application/pdf');
+
         return {
-          text: geminiText || '',
+          text: aiText || '',
           metadata: {
             pages: 'unknown',
-            processing_method: 'gemini_fallback',
-            text_length: geminiText?.length || 0,
+            processing_method: 'ai_fallback',
+            text_length: aiText?.length || 0,
             pdf_parse_error: pdfError.message,
-            note: 'PDF-parse failed, processed with Gemini AI'
+            note: 'PDF-parse failed, processed with AI'
           }
         };
-      } catch (geminiError) {
-        console.log(`Both PDF-parse and Gemini failed: ${geminiError.message}`);
-        
-        // Last resort: return minimal info
+      } catch (aiError) {
+        console.log(`Both PDF-parse and AI failed: ${aiError.message}`);
+
         return {
           text: '',
           metadata: {
@@ -626,7 +696,7 @@ class UniversalDocumentProcessor {
             processing_method: 'failed',
             text_length: 0,
             pdf_parse_error: pdfError.message,
-            gemini_error: geminiError.message,
+            ai_error: aiError.message,
             note: 'All processing methods failed'
           }
         };
@@ -635,80 +705,13 @@ class UniversalDocumentProcessor {
   }
 
   async processPDFBuffer(buffer) {
-    try {
-      // Primary method: pdf-parse
-      const parsed = await pdfParse(buffer);
-      
-      // Check if we got meaningful text
-      if (parsed.text && parsed.text.trim().length > 0) {
-        return {
-          text: parsed.text,
-          metadata: {
-            pages: parsed.numpages,
-            info: parsed.info,
-            processing_method: 'pdf-parse',
-            text_length: parsed.text.length
-          }
-        };
-      }
-      
-      // If no text extracted, this might be an image-based PDF
-      console.log('PDF-parse extracted no text, trying Gemini AI for OCR...');
-      
-      // Fallback: Use Gemini AI for OCR on image-based PDFs
-      const geminiText = await this.processWithGeminiBuffer(buffer, 'application/pdf');
-      
-      return {
-        text: geminiText || '',
-        metadata: {
-          pages: parsed.numpages || 'unknown',
-          info: parsed.info || {},
-          processing_method: 'gemini_ocr',
-          text_length: geminiText?.length || 0,
-          note: 'Processed with Gemini OCR (likely image-based PDF)'
-        }
-      };
-      
-    } catch (pdfError) {
-      console.log(`PDF-parse failed (${pdfError.message}), trying Gemini AI...`);
-      
-      // Fallback to Gemini AI if pdf-parse fails
-      try {
-        const geminiText = await this.processWithGeminiBuffer(buffer, 'application/pdf');
-        
-        return {
-          text: geminiText || '',
-          metadata: {
-            pages: 'unknown',
-            processing_method: 'gemini_fallback',
-            text_length: geminiText?.length || 0,
-            pdf_parse_error: pdfError.message,
-            note: 'PDF-parse failed, processed with Gemini AI'
-          }
-        };
-      } catch (geminiError) {
-        console.log(`Both PDF-parse and Gemini failed: ${geminiError.message}`);
-        
-        // Last resort: return minimal info
-        return {
-          text: '',
-          metadata: {
-            pages: 'unknown',
-            processing_method: 'failed',
-            text_length: 0,
-            pdf_parse_error: pdfError.message,
-            gemini_error: geminiError.message,
-            note: 'All processing methods failed'
-          }
-        };
-      }
-    }
+    return this.processPDF(null, buffer);
   }
 
   async processWord(filePath, buffer) {
     const data = buffer || fs.readFileSync(filePath);
     const result = await mammoth.extractRawText({ buffer: data });
-    
+
     return {
       text: result.value,
       metadata: {
@@ -718,41 +721,38 @@ class UniversalDocumentProcessor {
   }
 
   async processWordLegacy(filePath, buffer) {
-    // For .doc files, fallback to Gemini AI
-    const mimeType = 'application/msword';
+    const data = buffer || (filePath ? fs.readFileSync(filePath) : null);
+    if (!data) {
+      return { text: '', metadata: { processed_with: 'failed', error: 'No input data' } };
+    }
     return {
-      text: await this.processWithGeminiBuffer(buffer || fs.readFileSync(filePath), mimeType),
-      metadata: { processed_with: 'gemini_ai' }
+      text: await this.processWithAIBuffer(data, 'application/msword'),
+      metadata: { processed_with: 'ai' }
     };
   }
 
   async processPowerPoint(filePath, buffer) {
-    // For PowerPoint files (.pptx, .ppt), try to extract text
     try {
-      // First try with a PowerPoint library if available
-      // For now, fallback to Gemini AI with appropriate mime type
       const data = buffer || fs.readFileSync(filePath);
       const extension = filePath ? path.extname(filePath).toLowerCase() : '.pptx';
-      const mimeType = extension === '.ppt' ? 
-        'application/vnd.ms-powerpoint' : 
+      const mimeType = extension === '.ppt' ?
+        'application/vnd.ms-powerpoint' :
         'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-      
-      // Try to extract basic text if it's PPTX (XML-based)
+
       if (extension === '.pptx') {
         try {
           const text = data.toString('utf8');
-          // Look for text content in XML
           const textMatches = text.match(/<a:t[^>]*>([^<]+)<\/a:t>/g);
           if (textMatches && textMatches.length > 0) {
             const extractedText = textMatches
               .map(match => match.replace(/<[^>]*>/g, ''))
               .join(' ')
               .trim();
-            
+
             if (extractedText.length > 0) {
               return {
                 text: extractedText,
-                metadata: { 
+                metadata: {
                   processed_with: 'xml_extraction',
                   slides_detected: textMatches.length,
                   presentation_type: 'pptx'
@@ -761,15 +761,14 @@ class UniversalDocumentProcessor {
             }
           }
         } catch (xmlError) {
-          console.warn('PowerPoint XML extraction failed, using Gemini:', xmlError.message);
+          console.warn('PowerPoint XML extraction failed, using AI:', xmlError.message);
         }
       }
-      
-      // Fallback to Gemini AI
+
       return {
-        text: await this.processWithGeminiBuffer(data, mimeType),
-        metadata: { 
-          processed_with: 'gemini_ai',
+        text: await this.processWithAIBuffer(data, mimeType),
+        metadata: {
+          processed_with: 'ai',
           presentation_type: extension.substring(1)
         }
       };
@@ -777,7 +776,7 @@ class UniversalDocumentProcessor {
       console.error('PowerPoint processing error:', error);
       return {
         text: '',
-        metadata: { 
+        metadata: {
           error: error.message,
           processed_with: 'failed'
         }
@@ -788,7 +787,7 @@ class UniversalDocumentProcessor {
   async processExcel(filePath, buffer) {
     const data = buffer || fs.readFileSync(filePath);
     const workbook = xlsx.read(data, { type: 'buffer' });
-    
+
     let text = '';
     const metadata = {
       sheets: [],
@@ -798,11 +797,11 @@ class UniversalDocumentProcessor {
     workbook.SheetNames.forEach(sheetName => {
       const sheet = workbook.Sheets[sheetName];
       const jsonData = xlsx.utils.sheet_to_json(sheet, { header: 1 });
-      
+
       text += `\n=== SHEET: ${sheetName} ===\n`;
       text += jsonData.map(row => row.join(' | ')).join('\n');
       text += '\n';
-      
+
       metadata.sheets.push({
         name: sheetName,
         rows: jsonData.length,
@@ -815,11 +814,11 @@ class UniversalDocumentProcessor {
 
   async processCSV(filePath, buffer) {
     const data = buffer ? buffer.toString() : fs.readFileSync(filePath, 'utf8');
-    
+
     return new Promise((resolve, reject) => {
       const results = [];
       const metadata = { rows: 0, columns: 0 };
-      
+
       Readable.from([data])
         .pipe(csv())
         .on('data', (row) => {
@@ -852,8 +851,7 @@ class UniversalDocumentProcessor {
     try {
       const jsonText = buffer ? buffer.toString('utf8') : fs.readFileSync(filePath, 'utf8');
       const jsonData = JSON.parse(jsonText);
-      
-      // Convert JSON to readable text
+
       const extractTextFromJson = (obj, prefix = '') => {
         if (typeof obj === 'string') return obj;
         if (typeof obj === 'number' || typeof obj === 'boolean') return String(obj);
@@ -869,7 +867,7 @@ class UniversalDocumentProcessor {
       };
 
       const extractedText = extractTextFromJson(jsonData);
-      
+
       return {
         text: extractedText,
         metadata: {
@@ -880,7 +878,6 @@ class UniversalDocumentProcessor {
         }
       };
     } catch (error) {
-      // If JSON parsing fails, treat as plain text
       const text = buffer ? buffer.toString('utf8') : fs.readFileSync(filePath, 'utf8');
       return {
         text,
@@ -896,13 +893,12 @@ class UniversalDocumentProcessor {
 
   async processXML(filePath, buffer) {
     const xmlText = buffer ? buffer.toString('utf8') : fs.readFileSync(filePath, 'utf8');
-    
-    // Simple XML text extraction - remove tags and extract content
+
     const textContent = xmlText
-      .replace(/<[^>]*>/g, ' ') // Remove XML tags
-      .replace(/\s+/g, ' ') // Normalize whitespace
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
       .trim();
-    
+
     return {
       text: textContent,
       metadata: {
@@ -916,62 +912,46 @@ class UniversalDocumentProcessor {
 
   async processImage(filePath, buffer) {
     const imageBuffer = buffer || fs.readFileSync(filePath);
-    const mimeType = mime.lookup(filePath) || 'image/jpeg';
-    
+    const mimeType = (filePath && mime.lookup(filePath)) || 'image/jpeg';
+
     return {
       text: await this.processImageBuffer(imageBuffer, mimeType),
       metadata: {
-        processed_with: 'gemini_vision'
+        processed_with: 'ai_vision'
       }
     };
   }
 
   async processImageBuffer(buffer, mimeType) {
     try {
-      // Basic validation: check if buffer has reasonable size and content
       if (!buffer || buffer.length < 100) {
         return "";
       }
 
-      // For test/fake images, return empty instead of placeholder
       if (buffer.length < 5000 && this.isLikelyTestImage(buffer)) {
         return "";
       }
 
       const prompt = "Describe this image in detail. Extract any text you can see. Focus on the main content and any readable text or information.";
-      
-      const imagePart = {
-        inlineData: {
-          data: buffer.toString('base64'),
-          mimeType: mimeType
-        }
-      };
 
-      const result = await this.model.generateContent([prompt, imagePart]);
-      return result.response.text();
+      return await this._aiGenerateContent(prompt, {
+        data: buffer.toString('base64'),
+        mimeType: mimeType
+      });
     } catch (error) {
-      // If processing fails, return empty text
       return "";
     }
   }
 
-  /**
-   * Helper to detect test/fake images
-   */
   isLikelyTestImage(buffer) {
-    // Check for very simple/repetitive content that indicates a test image
-    const content = buffer.toString('hex');
     const uniqueBytes = new Set(buffer).size;
-    
-    // If the image has very few unique bytes, it's likely a test
     return uniqueBytes < 20 || buffer.length < 2000;
   }
 
   async processSVG(filePath, buffer) {
     const svgContent = buffer ? buffer.toString() : fs.readFileSync(filePath, 'utf8');
     const $ = cheerio.load(svgContent, { xmlMode: true });
-    
-    // Extract text elements from SVG
+
     let text = '';
     $('text, tspan').each((i, elem) => {
       text += $(elem).text() + ' ';
@@ -993,13 +973,12 @@ class UniversalDocumentProcessor {
   async processHTMLBuffer(buffer) {
     const html = buffer.toString();
     const $ = cheerio.load(html);
-    
-    // Remove script and style elements
+
     $('script, style, nav, header, footer, aside').remove();
-    
+
     const title = $('title').text() || '';
     const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
-    
+
     return {
       text: `${title ? `Title: ${title}\n\n` : ''}${bodyText}`,
       metadata: {
@@ -1010,28 +989,26 @@ class UniversalDocumentProcessor {
     };
   }
 
-  async processWithGemini(filePath, buffer) {
+  async processWithAI(filePath, buffer) {
     const fileBuffer = buffer || fs.readFileSync(filePath);
-    const mimeType = mime.lookup(filePath) || 'application/octet-stream';
-    return await this.processWithGeminiBuffer(fileBuffer, mimeType);
+    const mimeType = (filePath && mime.lookup(filePath)) || 'application/octet-stream';
+    const text = await this.processWithAIBuffer(fileBuffer, mimeType);
+    return {
+      text: text || '',
+      metadata: { processed_with: 'ai' }
+    };
   }
 
-  async processWithGeminiBuffer(buffer, mimeType) {
+  async processWithAIBuffer(buffer, mimeType) {
     try {
       const prompt = `Extract all text content from this document. Preserve formatting and structure where possible. If this contains tables or structured data, format it clearly.`;
-      
-      const filePart = {
-        inlineData: {
-          data: buffer.toString('base64'),
-          mimeType: mimeType
-        }
-      };
 
-      const result = await this.model.generateContent([prompt, filePart]);
-      return result.response.text();
+      return await this._aiGenerateContent(prompt, {
+        data: buffer.toString('base64'),
+        mimeType: mimeType
+      });
     } catch (error) {
-      // Return empty text on failure instead of throwing
-      console.warn('Gemini processing failed:', error.message);
+      console.warn('AI processing failed:', error.message);
       return "";
     }
   }
@@ -1040,9 +1017,7 @@ class UniversalDocumentProcessor {
   isURL(input) {
     try {
       const url = new URL(input);
-      // Check if it's actually a URL (starts with http, https, ftp, etc.) 
-      // and not a Windows file path (which would have a single letter protocol like 'e:')
-      return url.protocol.length > 2 && (url.protocol.startsWith('http') || 
+      return url.protocol.length > 2 && (url.protocol.startsWith('http') ||
              url.protocol.startsWith('ftp') || url.protocol.startsWith('ws'));
     } catch {
       return false;
@@ -1061,19 +1036,31 @@ class UniversalDocumentProcessor {
   getExtensionFromMimeType(mimeType) {
     const extensions = {
       'application/pdf': 'pdf',
+      'application/json': 'json',
+      'application/xml': 'xml',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
       'application/msword': 'doc',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
       'application/vnd.ms-excel': 'xls',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+      'application/vnd.ms-powerpoint': 'ppt',
       'text/csv': 'csv',
       'text/plain': 'txt',
       'text/html': 'html',
+      'text/xml': 'xml',
+      'text/markdown': 'md',
+      'application/javascript': 'js',
+      'text/javascript': 'js',
+      'text/yaml': 'yaml',
       'image/jpeg': 'jpg',
       'image/png': 'png',
       'image/webp': 'webp',
-      'image/gif': 'gif'
+      'image/gif': 'gif',
+      'image/svg+xml': 'svg',
+      'image/bmp': 'bmp',
+      'image/tiff': 'tiff'
     };
-    
+
     return extensions[mimeType.split(';')[0]] || 'unknown';
   }
 
@@ -1084,7 +1071,7 @@ class UniversalDocumentProcessor {
       case 'video': return 'video';
       case 'audio': return 'audio';
       case 'text': return 'text';
-      case 'application': 
+      case 'application':
         if (mimeType.includes('pdf')) return 'pdf';
         if (mimeType.includes('word')) return 'doc';
         if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) return 'spreadsheet';
@@ -1093,7 +1080,6 @@ class UniversalDocumentProcessor {
     }
   }
 
-  // Public methods
   getSupportedFormats() {
     return Object.keys(this.supportedFormats);
   }
@@ -1111,3 +1097,4 @@ class UniversalDocumentProcessor {
 }
 
 export default UniversalDocumentProcessor;
+export { createAIProvider };

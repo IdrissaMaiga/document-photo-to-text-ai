@@ -1,12 +1,11 @@
 {
   "name": "document-photo-to-text-ai",
-  "version": "1.0.0",
-  "description": "A universal document processor that extracts text from various file formats including PDFs, images, documents, and more using Google Gemini AI",
+  "version": "2.0.0",
+  "description": "A universal document processor that extracts text from various file formats including PDFs, images, documents, and more. Supports multiple AI providers: Gemini, OpenAI, Anthropic Claude",
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "node run-tests.js",
-    "mcp-server": "node mcp-server.js"
+    "test": "node run-tests.js"
   },
   "keywords": [
     "document-processing",
@@ -23,7 +22,12 @@
     "xml",
     "youtube",
     "gemini",
-    "google-ai"
+    "google-ai",
+    "openai",
+    "anthropic",
+    "claude",
+    "gpt-4o",
+    "multi-provider"
   ],
   "author": "Idriss Maiga <maigadrisking@gmail.com>",
   "license": "MIT",
@@ -35,9 +39,17 @@
     "url": "https://github.com/IdrissaMaiga/document-photo-to-text-ai/issues"
   },
   "homepage": "https://github.com/IdrissaMaiga/document-photo-to-text-ai#readme",
-  "dependencies": {
+  "peerDependencies": {
     "@google/generative-ai": "^0.21.0",
-    "@modelcontextprotocol/sdk": "^1.21.1",
+    "openai": "^4.0.0",
+    "@anthropic-ai/sdk": "^0.30.0"
+  },
+  "peerDependenciesMeta": {
+    "@google/generative-ai": { "optional": true },
+    "openai": { "optional": true },
+    "@anthropic-ai/sdk": { "optional": true }
+  },
+  "dependencies": {
     "cheerio": "^1.0.0-rc.12",
     "csv-parser": "^3.0.0",
     "mammoth": "^1.6.0",

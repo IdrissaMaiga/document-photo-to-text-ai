@@ -1,0 +1,8 @@
+test/
+tests-tool.js
+test-edge-cases.js
+run-tests.js
+linkedin-post.txt
+.git/
+node_modules/
+*.log

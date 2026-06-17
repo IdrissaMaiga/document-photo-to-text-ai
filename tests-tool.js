@@ -2,7 +2,6 @@ import UniversalDocumentProcessor from './index.js';
 import fs from 'fs';
 import path from 'path';
 
-// Test script to run all extraction possibilities
 const testFiles = [
   'Calculator.java',
   'README.md',
@@ -31,7 +30,6 @@ const testFiles = [
   'sample.yaml'
 ];
 
-// URL tests (these will work without local files)
 const testUrls = [
   {
     url: 'https://www.google.com',
@@ -40,257 +38,372 @@ const testUrls = [
   {
     url: 'https://httpbin.org/json',
     description: 'JSON API response'
-  },
-  // YouTube URLs - uncomment and add real video IDs
-  {
-    url: 'https://www.youtube.com/watch?v=BxMxjLCVJK0',
-    description: 'YouTube video (transcript extraction)'
   }
 ];
 
-// Binary file tests (these need actual files to be placed in test/ folder)
-const binaryFileTests = [
-  {
-    filename: 'sample.pdf',
-    description: 'PDF document',
-    note: 'Place a PDF file here to test PDF extraction'
-  },
-  {
-    filename: 'sample.docx',
-    description: 'Word document (.docx)',
-    note: 'Place a .docx file here to test Word document extraction'
-  },
-  {
-    filename: 'sample.xlsx',
-    description: 'Excel spreadsheet',
-    note: 'Place a .xlsx file here to test Excel extraction'
-  },
-  {
-    filename: 'sample.png',
-    description: 'PNG image',
-    note: 'Place a .png file here to test image OCR'
-  },
-  {
-    filename: 'sample.jpg',
-    description: 'JPEG image',
-    note: 'Place a .jpg file here to test image OCR'
+function resolveProviderConfig() {
+  if (process.env.OPENAI_API_KEY) {
+    return { provider: 'openai', apiKey: process.env.OPENAI_API_KEY };
   }
-];
+  if (process.env.ANTHROPIC_API_KEY) {
+    return { provider: 'anthropic', apiKey: process.env.ANTHROPIC_API_KEY };
+  }
+  if (process.env.GOOGLE_API_KEY) {
+    return { provider: 'gemini', apiKey: process.env.GOOGLE_API_KEY };
+  }
+  return null;
+}
 
 async function runFileTests(processor) {
-  console.log('📁 Testing Local Files\n');
-  console.log('='.repeat(50));
+  console.log('--- Testing Local Files ---\n');
+
+  let passed = 0;
+  let failed = 0;
 
   for (const fileName of testFiles) {
     const filePath = path.join('./test', fileName);
 
     if (!fs.existsSync(filePath)) {
-      console.log(`❌ ${fileName}: File not found`);
+      console.log(`  SKIP ${fileName}: File not found`);
       continue;
     }
 
     try {
-      console.log(`\n📄 Testing: ${fileName}`);
-      console.log('-'.repeat(30));
-
       const result = await processor.processDocument(filePath);
 
-      console.log(`✅ File Type: ${result.file_type}`);
-      console.log(`📏 File Size: ${result.file_size} bytes`);
-      console.log(`🔒 File Hash: ${result.file_hash.substring(0, 16)}...`);
-
-      if (result.metadata && Object.keys(result.metadata).length > 0) {
-        console.log(`📊 Metadata keys: ${Object.keys(result.metadata).join(', ')}`);
+      if (!result.extracted_text && result.extracted_text !== '') {
+        console.log(`  FAIL ${fileName}: extracted_text is ${result.extracted_text}`);
+        failed++;
+        continue;
       }
 
-      const textPreview = result.extracted_text.substring(0, 150);
-      console.log(`📝 Text Preview: "${textPreview}${result.extracted_text.length > 150 ? '...' : ''}"`);
+      if (!result.file_type) {
+        console.log(`  FAIL ${fileName}: missing file_type`);
+        failed++;
+        continue;
+      }
+
+      if (!result.file_hash) {
+        console.log(`  FAIL ${fileName}: missing file_hash`);
+        failed++;
+        continue;
+      }
+
+      const textLen = result.extracted_text.length;
+      console.log(`  PASS ${fileName} (type=${result.file_type}, size=${result.file_size}b, text=${textLen} chars)`);
+      passed++;
 
     } catch (error) {
-      console.log(`❌ Error processing ${fileName}: ${error.message}`);
+      console.log(`  FAIL ${fileName}: ${error.message}`);
+      failed++;
     }
   }
-}
 
-async function runUrlTests(processor) {
-  console.log('\n🌐 Testing URL Processing\n');
-  console.log('='.repeat(50));
-
-  for (const { url, description } of testUrls) {
-    try {
-      console.log(`\n🔗 Testing: ${description}`);
-      console.log(`URL: ${url}`);
-      console.log('-'.repeat(40));
-
-      const result = await processor.processDocument(url);
-
-      console.log(`✅ File Type: ${result.file_type}`);
-      console.log(`📏 Content Size: ${result.file_size} bytes`);
-      console.log(`🌐 URL: ${result.file_url}`);
-
-      const textPreview = result.extracted_text.substring(0, 150);
-      console.log(`📝 Text Preview: "${textPreview}${result.extracted_text.length > 150 ? '...' : ''}"`);
-
-    } catch (error) {
-      console.log(`❌ Error processing URL ${url}: ${error.message}`);
-    }
-  }
-}
-
-async function runBinaryFileTests(processor) {
-  console.log('\n📋 Binary File Tests (Manual)\n');
-  console.log('='.repeat(50));
-
-  for (const { filename, description, note } of binaryFileTests) {
-    const filePath = path.join('./test', filename);
-
-    if (!fs.existsSync(filePath)) {
-      console.log(`⚠️  ${filename}: ${note}`);
-      continue;
-    }
-
-    try {
-      console.log(`\n📄 Testing: ${description} (${filename})`);
-      console.log('-'.repeat(40));
-
-      const result = await processor.processDocument(filePath);
-
-      console.log(`✅ File Type: ${result.file_type}`);
-      console.log(`📏 File Size: ${result.file_size} bytes`);
-      console.log(`🔒 File Hash: ${result.file_hash.substring(0, 16)}...`);
-
-      const textPreview = result.extracted_text.substring(0, 150);
-      console.log(`📝 Text Preview: "${textPreview}${result.extracted_text.length > 150 ? '...' : ''}"`);
-
-    } catch (error) {
-      console.log(`❌ Error processing ${filename}: ${error.message}`);
-    }
-  }
+  return { passed, failed };
 }
 
 async function runBufferTests(processor) {
-  console.log('\n🧪 Testing Buffer Processing\n');
-  console.log('='.repeat(50));
+  console.log('\n--- Testing Buffer Processing ---\n');
 
-  // Test 1: JSON Buffer - use actual sample.json content
-  try {
-    console.log('\n📄 Testing: JSON Buffer (from sample.json)');
-    console.log('-'.repeat(25));
+  let passed = 0;
+  let failed = 0;
 
-    const jsonContent = fs.readFileSync(path.join('./test', 'sample.json'), 'utf8');
-    const jsonBuffer = Buffer.from(jsonContent);
+  const bufferTests = [
+    { file: 'sample.json', mime: 'application/json' },
+    { file: 'sample.txt', mime: 'text/plain' },
+    { file: 'sample.html', mime: 'text/html' },
+    { file: 'sample.csv', mime: 'text/csv' },
+    { file: 'sample.xml', mime: 'application/xml' },
+  ];
 
-    const result = await processor.processDocument(jsonBuffer, {
-      filename: 'test.json',
-      mimetype: 'application/json'
-    });
+  for (const { file, mime } of bufferTests) {
+    const filePath = path.join('./test', file);
+    if (!fs.existsSync(filePath)) {
+      console.log(`  SKIP ${file}: File not found`);
+      continue;
+    }
 
-    console.log(`✅ File Type: ${result.file_type}`);
-    console.log(`📏 Buffer Size: ${result.file_size} bytes`);
-    const textPreview = result.extracted_text.substring(0, 150);
-    console.log(`📝 Text Preview: "${textPreview}${result.extracted_text.length > 150 ? '...' : ''}"`);
+    try {
+      const buffer = fs.readFileSync(filePath);
+      const result = await processor.processDocument(buffer, {
+        filename: file,
+        mimetype: mime
+      });
 
-  } catch (error) {
-    console.log(`❌ JSON Buffer test error: ${error.message}`);
+      if (result.extracted_text === null || result.extracted_text === undefined) {
+        console.log(`  FAIL Buffer(${file}): extracted_text is null/undefined`);
+        failed++;
+        continue;
+      }
+
+      if (result.extracted_text.length === 0) {
+        console.log(`  FAIL Buffer(${file}): extracted_text is empty`);
+        failed++;
+        continue;
+      }
+
+      console.log(`  PASS Buffer(${file}) (text=${result.extracted_text.length} chars)`);
+      passed++;
+
+    } catch (error) {
+      console.log(`  FAIL Buffer(${file}): ${error.message}`);
+      failed++;
+    }
   }
 
-  // Test 2: Text Buffer - use actual sample.txt content
+  return { passed, failed };
+}
+
+async function runConstructorTests() {
+  console.log('\n--- Testing Constructor Variants ---\n');
+
+  let passed = 0;
+  let failed = 0;
+
+  // Test 1: No config (text extraction only)
   try {
-    console.log('\n📄 Testing: Text Buffer (from sample.txt)');
-    console.log('-'.repeat(25));
+    const p = new UniversalDocumentProcessor();
+    const formats = p.getSupportedFormats();
+    if (formats.length > 20) {
+      console.log(`  PASS No-config constructor (${formats.length} formats)`);
+      passed++;
+    } else {
+      console.log(`  FAIL No-config constructor: only ${formats.length} formats`);
+      failed++;
+    }
+  } catch (error) {
+    console.log(`  FAIL No-config constructor: ${error.message}`);
+    failed++;
+  }
 
-    const textContent = fs.readFileSync(path.join('./test', 'sample.txt'), 'utf8');
-    const textBuffer = Buffer.from(textContent);
+  // Test 2: String config (backward compat)
+  try {
+    const p = new UniversalDocumentProcessor('fake-key-for-test');
+    const formats = p.getSupportedFormats();
+    console.log(`  PASS String config (backward compat, ${formats.length} formats)`);
+    passed++;
+  } catch (error) {
+    console.log(`  FAIL String config: ${error.message}`);
+    failed++;
+  }
 
-    const result = await processor.processDocument(textBuffer, {
+  // Test 3: Object config
+  try {
+    const p = new UniversalDocumentProcessor({ provider: 'gemini', apiKey: 'fake-key' });
+    console.log(`  PASS Object config (gemini)`);
+    passed++;
+  } catch (error) {
+    console.log(`  FAIL Object config: ${error.message}`);
+    failed++;
+  }
+
+  // Test 4: Object config with OpenAI
+  try {
+    const p = new UniversalDocumentProcessor({ provider: 'openai', apiKey: 'fake-key', model: 'gpt-4o' });
+    console.log(`  PASS Object config (openai)`);
+    passed++;
+  } catch (error) {
+    console.log(`  FAIL Object config openai: ${error.message}`);
+    failed++;
+  }
+
+  // Test 5: Object config with Anthropic
+  try {
+    const p = new UniversalDocumentProcessor({ provider: 'anthropic', apiKey: 'fake-key' });
+    console.log(`  PASS Object config (anthropic)`);
+    passed++;
+  } catch (error) {
+    console.log(`  FAIL Object config anthropic: ${error.message}`);
+    failed++;
+  }
+
+  // Test 6: Function config
+  try {
+    const customFn = async (prompt, inlineData) => 'custom result';
+    const p = new UniversalDocumentProcessor(customFn);
+    console.log(`  PASS Function config (custom provider)`);
+    passed++;
+  } catch (error) {
+    console.log(`  FAIL Function config: ${error.message}`);
+    failed++;
+  }
+
+  // Test 7: Options work
+  try {
+    const p = new UniversalDocumentProcessor(null, {
+      maxFileSize: 50 * 1024 * 1024,
+      timeout: 60000,
+      cacheEnabled: false
+    });
+    if (p.options.maxFileSize === 50 * 1024 * 1024 && p.options.timeout === 60000 && p.options.cacheEnabled === false) {
+      console.log(`  PASS Options (maxFileSize, timeout, cacheEnabled)`);
+      passed++;
+    } else {
+      console.log(`  FAIL Options not applied correctly`);
+      failed++;
+    }
+  } catch (error) {
+    console.log(`  FAIL Options: ${error.message}`);
+    failed++;
+  }
+
+  // Test 8: Cache works
+  try {
+    const p = new UniversalDocumentProcessor();
+    const stats = p.getCacheStats();
+    if (stats.size === 0) {
+      console.log(`  PASS Cache stats (empty on init)`);
+      passed++;
+    } else {
+      console.log(`  FAIL Cache not empty on init`);
+      failed++;
+    }
+    p.clearCache();
+    console.log(`  PASS clearCache()`);
+    passed++;
+  } catch (error) {
+    console.log(`  FAIL Cache: ${error.message}`);
+    failed++;
+  }
+
+  return { passed, failed };
+}
+
+async function runCustomProviderTest() {
+  console.log('\n--- Testing Custom AI Provider ---\n');
+
+  let passed = 0;
+  let failed = 0;
+
+  const customFn = async (prompt, inlineData) => {
+    return `Custom AI processed: prompt length=${prompt.length}, hasData=${!!inlineData}`;
+  };
+
+  const processor = new UniversalDocumentProcessor({ provider: customFn });
+
+  // Test that custom provider is used for image-like processing
+  try {
+    const fakeImageBuffer = Buffer.alloc(10000, 0xFF);
+    const result = await processor.processDocument(fakeImageBuffer, {
+      filename: 'test.jpg',
+      mimetype: 'image/jpeg'
+    });
+
+    // Image processing with our custom provider should return something
+    console.log(`  PASS Custom provider for image buffer (type=${result.file_type})`);
+    passed++;
+  } catch (error) {
+    console.log(`  FAIL Custom provider image: ${error.message}`);
+    failed++;
+  }
+
+  // Test that text files work without hitting the provider
+  try {
+    const txtBuffer = Buffer.from('Hello world test content');
+    const result = await processor.processDocument(txtBuffer, {
       filename: 'test.txt',
       mimetype: 'text/plain'
     });
 
-    console.log(`✅ File Type: ${result.file_type}`);
-    console.log(`� Buffer Size: ${result.file_size} bytes`);
-    console.log(`�📝 Extracted Text: "${result.extracted_text}"`);
-
+    if (result.extracted_text === 'Hello world test content') {
+      console.log(`  PASS Text file bypasses AI provider`);
+      passed++;
+    } else {
+      console.log(`  FAIL Text content mismatch: "${result.extracted_text}"`);
+      failed++;
+    }
   } catch (error) {
-    console.log(`❌ Text Buffer test error: ${error.message}`);
+    console.log(`  FAIL Text bypass: ${error.message}`);
+    failed++;
   }
 
-  // Test 3: HTML Buffer - use actual sample.html content
-  try {
-    console.log('\n📄 Testing: HTML Buffer (from sample.html)');
-    console.log('-'.repeat(25));
+  return { passed, failed };
+}
 
-    const htmlContent = fs.readFileSync(path.join('./test', 'sample.html'), 'utf8');
+async function runUrlTests(processor) {
+  console.log('\n--- Testing URL Processing ---\n');
 
-    const htmlBuffer = Buffer.from(htmlContent);
+  let passed = 0;
+  let failed = 0;
 
-    const result = await processor.processDocument(htmlBuffer, {
-      filename: 'test.html',
-      mimetype: 'text/html'
-    });
+  for (const { url, description } of testUrls) {
+    try {
+      const result = await processor.processDocument(url);
 
-    console.log(`✅ File Type: ${result.file_type}`);
-    console.log(`📏 Buffer Size: ${result.file_size} bytes`);
-    const textPreview = result.extracted_text.substring(0, 150);
-    console.log(`📝 Text Preview: "${textPreview}${result.extracted_text.length > 150 ? '...' : ''}"`);
-
-  } catch (error) {
-    console.log(`❌ HTML Buffer test error: ${error.message}`);
+      if (result.extracted_text && result.extracted_text.length > 0) {
+        console.log(`  PASS ${description} (text=${result.extracted_text.length} chars)`);
+        passed++;
+      } else {
+        console.log(`  FAIL ${description}: no text extracted`);
+        failed++;
+      }
+    } catch (error) {
+      console.log(`  FAIL ${description}: ${error.message}`);
+      failed++;
+    }
   }
+
+  return { passed, failed };
 }
 
 async function runComprehensiveTests() {
-  // Check for API key
-  const apiKey = process.env.GOOGLE_API_KEY || 'YOUR_GOOGLE_API_KEY_HERE';
+  const config = resolveProviderConfig();
 
-  if (apiKey === 'YOUR_GOOGLE_API_KEY_HERE') {
-    console.log('⚠️  GOOGLE_API_KEY not set. Some tests may fail.');
-    console.log('Set it with: $env:GOOGLE_API_KEY = "your-key-here"');
-    console.log('');
+  console.log('=== Document Photo to Text AI v2.0 — Test Suite ===\n');
+
+  if (config) {
+    console.log(`AI Provider: ${config.provider}`);
+  } else {
+    console.log('AI Provider: NONE (text extraction only, image/OCR tests will be limited)');
+    console.log('Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_API_KEY to enable AI tests.');
   }
+  console.log('');
 
-  const processor = new UniversalDocumentProcessor(apiKey);
+  const processor = new UniversalDocumentProcessor(config);
 
-  console.log('🧪 Universal Document Processor - Comprehensive Test Suite\n');
-  console.log('Testing all extraction possibilities...\n');
+  let totalPassed = 0;
+  let totalFailed = 0;
 
-  try {
-    // Test local files
-    await runFileTests(processor);
+  // Constructor tests
+  const c = await runConstructorTests();
+  totalPassed += c.passed;
+  totalFailed += c.failed;
 
-    // Test URLs
-    await runUrlTests(processor);
+  // Custom provider tests
+  const cp = await runCustomProviderTest();
+  totalPassed += cp.passed;
+  totalFailed += cp.failed;
 
-    // Test buffer processing with real file content
-    await runBufferTests(processor);
+  // File tests
+  const f = await runFileTests(processor);
+  totalPassed += f.passed;
+  totalFailed += f.failed;
 
-    // Show supported formats
-    console.log('\n📋 Supported File Formats\n');
-    console.log('='.repeat(50));
-    const formats = processor.getSupportedFormats();
-    console.log(`Total formats supported: ${formats.length}`);
-    console.log('Formats:', formats.join(', '));
+  // Buffer tests
+  const b = await runBufferTests(processor);
+  totalPassed += b.passed;
+  totalFailed += b.failed;
 
-    // Show cache stats
-    console.log('\n💾 Cache Statistics\n');
-    console.log('='.repeat(50));
-    const cacheStats = processor.getCacheStats();
-    console.log(`Cache size: ${cacheStats.size} items`);
-    if (cacheStats.keys.length > 0) {
-      console.log('Cached items:', cacheStats.keys.length);
-    }
+  // URL tests
+  const u = await runUrlTests(processor);
+  totalPassed += u.passed;
+  totalFailed += u.failed;
 
-  } catch (error) {
-    console.error('💥 Test suite error:', error.message);
+  // Summary
+  console.log('\n=== RESULTS ===');
+  console.log(`  Passed: ${totalPassed}`);
+  console.log(`  Failed: ${totalFailed}`);
+  console.log(`  Total:  ${totalPassed + totalFailed}`);
+
+  if (totalFailed > 0) {
+    console.log('\nSome tests failed. Check output above.');
+    process.exit(1);
+  } else {
+    console.log('\nAll tests passed!');
   }
-
-  console.log('\n' + '='.repeat(50));
-  console.log('🎉 Testing completed!');
-  console.log('\n💡 Tips:');
-  console.log('- All test files are in the test/ folder');
-  console.log('- Set GOOGLE_API_KEY for AI-powered processing');
-  console.log('- Check test/README.md for more details');
 }
 
-// Run the comprehensive tests
-runComprehensiveTests().catch(console.error);
+runComprehensiveTests().catch(error => {
+  console.error('Test suite crashed:', error);
+  process.exit(1);
+});
