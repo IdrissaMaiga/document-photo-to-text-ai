@@ -5,7 +5,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "node run-tests.js"
+    "test": "node tests-tool.js"
   },
   "keywords": [
     "document-processing",
@@ -40,14 +40,20 @@
   },
   "homepage": "https://github.com/IdrissaMaiga/document-photo-to-text-ai#readme",
   "peerDependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
     "@google/generative-ai": "^0.21.0",
-    "openai": "^4.0.0",
-    "@anthropic-ai/sdk": "^0.30.0"
+    "openai": "^4.0.0"
   },
   "peerDependenciesMeta": {
-    "@google/generative-ai": { "optional": true },
-    "openai": { "optional": true },
-    "@anthropic-ai/sdk": { "optional": true }
+    "@google/generative-ai": {
+      "optional": true
+    },
+    "openai": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
+      "optional": true
+    }
   },
   "dependencies": {
     "cheerio": "^1.0.0-rc.12",
