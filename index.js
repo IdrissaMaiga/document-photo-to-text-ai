@@ -872,7 +872,7 @@ class UniversalDocumentProcessor {
         text: extractedText,
         metadata: {
           type: 'json',
-          keys: typeof jsonData === 'object' ? Object.keys(jsonData) : [],
+          keys: (typeof jsonData === 'object' && jsonData !== null) ? Object.keys(jsonData) : [],
           size: jsonText.length,
           valid: true
         }
