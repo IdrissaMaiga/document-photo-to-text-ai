@@ -22,7 +22,7 @@
     "xml",
     "youtube",
     "gemini",
-    "google-ai",
+    "google-genai",
     "openai",
     "anthropic",
     "claude",
@@ -41,11 +41,15 @@
   },
   "homepage": "https://github.com/IdrissaMaiga/document-photo-to-text-ai#readme",
   "peerDependencies": {
-    "@anthropic-ai/sdk": "^0.30.0",
-    "@google/generative-ai": "^0.21.0",
-    "openai": "^4.0.0"
+    "@google/genai": ">=1.0.0",
+    "@google/generative-ai": ">=0.21.0",
+    "openai": ">=4.0.0",
+    "@anthropic-ai/sdk": ">=0.30.0"
   },
   "peerDependenciesMeta": {
+    "@google/genai": {
+      "optional": true
+    },
     "@google/generative-ai": {
       "optional": true
     },
@@ -57,19 +61,20 @@
     }
   },
   "dependencies": {
-    "cheerio": "^1.0.0-rc.12",
-    "csv-parser": "^3.0.0",
-    "mammoth": "^1.6.0",
-    "mime-types": "^2.1.35",
-    "pdf-parse": "^1.1.1",
-    "xlsx": "^0.18.5",
-    "youtube-captions-scraper": "^2.0.3",
-    "ytdl-core": "^4.11.5"
+    "@distube/ytdl-core": "^4.16.12",
+    "cheerio": "^1.2.0",
+    "csv-parser": "^3.2.1",
+    "jszip": "^3.10.2",
+    "mammoth": "^1.13.0",
+    "mime-types": "^3.0.2",
+    "pdf-parse": "^2.4.5",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "youtube-captions-scraper": "^2.0.3"
   },
   "publishConfig": {
     "access": "public"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.18.1"
   }
 }

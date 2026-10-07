@@ -15,6 +15,7 @@ Handles PDFs, images, Word documents, Excel spreadsheets, CSV files, HTML pages,
 ## Features
 
 - **Multi-Provider AI** — Choose your preferred AI provider: Gemini, OpenAI, Anthropic Claude, OpenRouter, or bring your own
+- **Install Only What You Use** — Provider SDKs are optional; you never download the ones you don't use
 - **42 Supported Formats** — PDFs, images, Word, Excel, PowerPoint, CSV, HTML, JSON, XML, YAML, code files, and more
 - **AI-Powered OCR** — Uses AI vision models for accurate text extraction from images and scanned documents
 - **Works Without AI** — Text-based formats (TXT, JSON, CSV, DOCX, XLSX, etc.) work without any AI provider
@@ -30,13 +31,13 @@ Handles PDFs, images, Word documents, Excel spreadsheets, CSV files, HTML pages,
 npm install @iditechs/document-photo-to-text-ai
 ```
 
-Then install the AI provider SDK you want to use (only needed for image/OCR features):
+**You only download the AI provider you use.** No provider SDK is installed with this package. Add the one you need (only required for image/OCR features):
 
 ```bash
 # For Google Gemini
-npm install @google/generative-ai
+npm install @google/genai
 
-# For OpenAI (GPT-4o, GPT-4 Vision)
+# For OpenAI
 npm install openai
 
 # For Anthropic Claude
@@ -44,6 +45,8 @@ npm install @anthropic-ai/sdk
 
 # For OpenRouter: nothing to install (uses the built-in fetch)
 ```
+
+If you call a provider whose SDK isn't installed, you get a clear error telling you which package to install. Projects that already have the older `@google/generative-ai` package keep working with it.
 
 > **No AI SDK needed** if you only process text-based formats like TXT, JSON, CSV, DOCX, XLSX, HTML, XML, code files, etc.
 
@@ -57,7 +60,8 @@ import UniversalDocumentProcessor from '@iditechs/document-photo-to-text-ai';
 // Google Gemini
 const processor = new UniversalDocumentProcessor({
   provider: 'gemini',
-  apiKey: 'YOUR_GOOGLE_API_KEY'
+  apiKey: 'YOUR_GOOGLE_API_KEY',
+  model: 'gemini-2.5-flash' // optional, default
 });
 
 // OpenAI
@@ -251,6 +255,21 @@ const docx = await processor.processDocument('./report.docx');
 // All work without any AI provider installed
 ```
 
+## Changelog
+
+### v2.1.0
+- Published as `@iditechs/document-photo-to-text-ai`
+- New **OpenRouter** provider (no SDK needed)
+- Gemini now uses the current `@google/genai` SDK (the legacy `@google/generative-ai` still works if installed)
+- Real PowerPoint (`.pptx`) text extraction, slide by slide, without AI
+- PDF parsing upgraded to `pdf-parse` v2 (handles more PDFs without AI)
+- OpenAI: PDFs and documents are sent as files instead of images
+- Buffers: real image type detected from the file bytes; format inferred from `mimetype` when the filename has no extension
+- URLs: redirects are followed and HTTP errors (404, 500) are reported instead of processed
+- YouTube: switched to the maintained `@distube/ytdl-core`; captions are still fetched if video info fails
+- Updated dependencies (SheetJS `xlsx` 0.20.3 from the official CDN, `cheerio` 1.x, `mime-types` 3.x)
+- Requires Node.js 20.18.1 or newer
+
 ## Migration from v1.x
 
 v2.0 is backward compatible — existing v1.x code still works:
@@ -261,7 +280,7 @@ const processor = new UniversalDocumentProcessor('YOUR_GOOGLE_API_KEY');
 ```
 
 **What changed:**
-- `@google/generative-ai` is now an optional peer dependency — install it explicitly if you use Gemini
+- AI provider SDKs are optional peer dependencies — install only the one you use (`@google/genai` for Gemini)
 - Added OpenAI and Anthropic support via object config
 - MCP server removed (use the library directly instead)
 
@@ -276,7 +295,7 @@ const processor = new UniversalDocumentProcessor({
 
 ## Requirements
 
-- Node.js >= 18.0.0
+- Node.js >= 20.18.1
 - At least one AI provider SDK installed, or an OpenRouter API key (only for image OCR / vision features)
 
 ## License

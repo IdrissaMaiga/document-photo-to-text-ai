@@ -8,12 +8,13 @@ import { URL } from 'url';
 import { Readable } from 'stream';
 
 // Document processing libraries
-import pdfParse from 'pdf-parse';
+import { PDFParse } from 'pdf-parse';
 import mammoth from 'mammoth';
-import xlsx from 'xlsx';
+import * as xlsx from 'xlsx';
+import JSZip from 'jszip';
 import csv from 'csv-parser';
 import * as cheerio from 'cheerio';
-import ytdl from 'ytdl-core';
+import ytdl from '@distube/ytdl-core';
 import { getSubtitles } from 'youtube-captions-scraper';
 
 // Builds an OpenAI-style content part: images as image_url, everything else (PDF, etc.) as a file part
@@ -38,22 +39,43 @@ async function createAIProvider(config) {
 
   switch (provider) {
     case 'gemini': {
+      const modelName = model || 'gemini-2.5-flash';
+      const toInlinePart = (inlineData) => ({ inlineData: { data: inlineData.data, mimeType: inlineData.mimeType } });
+
+      // Preferred: the current Google Gen AI SDK
+      let GoogleGenAI;
+      try {
+        ({ GoogleGenAI } = await import('@google/genai'));
+      } catch {}
+      if (GoogleGenAI) {
+        const ai = new GoogleGenAI({ apiKey });
+        return {
+          name: 'gemini',
+          async generateContent(prompt, inlineData) {
+            const parts = [{ text: prompt }];
+            if (inlineData) parts.push(toInlinePart(inlineData));
+            const result = await ai.models.generateContent({
+              model: modelName,
+              contents: [{ role: 'user', parts }]
+            });
+            return result.text || '';
+          }
+        };
+      }
+
+      // Fallback: the legacy SDK, for projects that still have it installed
       let GoogleGenerativeAI;
       try {
-        const mod = await import('@google/generative-ai');
-        GoogleGenerativeAI = mod.GoogleGenerativeAI;
+        ({ GoogleGenerativeAI } = await import('@google/generative-ai'));
       } catch {
-        throw new Error('Gemini provider requires "@google/generative-ai". Install it with: npm install @google/generative-ai');
+        throw new Error('Gemini provider requires "@google/genai". Install it with: npm install @google/genai');
       }
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const aiModel = genAI.getGenerativeModel({ model: model || 'gemini-2.5-flash' });
+      const aiModel = new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: modelName });
       return {
         name: 'gemini',
         async generateContent(prompt, inlineData) {
           const parts = [prompt];
-          if (inlineData) {
-            parts.push({ inlineData: { data: inlineData.data, mimeType: inlineData.mimeType } });
-          }
+          if (inlineData) parts.push(toInlinePart(inlineData));
           const result = await aiModel.generateContent(parts);
           return result.response.text();
         }
@@ -707,7 +729,7 @@ class UniversalDocumentProcessor {
     const data = buffer || fs.readFileSync(filePath);
 
     try {
-      const parsed = await pdfParse(data);
+      const parsed = await this.parsePDF(data);
 
       if (parsed.text && parsed.text.trim().length > 0) {
         return {
@@ -770,6 +792,21 @@ class UniversalDocumentProcessor {
     }
   }
 
+  // Wraps pdf-parse v2. The data is copied because pdf.js may take ownership of the buffer it's given
+  async parsePDF(data) {
+    const parser = new PDFParse({ data: new Uint8Array(data) });
+    try {
+      const textResult = await parser.getText({ pageJoiner: '' });
+      let info = {};
+      try {
+        info = (await parser.getInfo()).info || {};
+      } catch {}
+      return { text: textResult.text.trim(), numpages: textResult.total, info };
+    } finally {
+      await parser.destroy();
+    }
+  }
+
   async processPDFBuffer(buffer) {
     return this.processPDF(null, buffer);
   }
@@ -800,31 +837,29 @@ class UniversalDocumentProcessor {
   async processPowerPoint(filePath, buffer) {
     try {
       const data = buffer || fs.readFileSync(filePath);
-      const extension = filePath ? path.extname(filePath).toLowerCase() : '.pptx';
-      const mimeType = extension === '.ppt' ?
-        'application/vnd.ms-powerpoint' :
-        'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+      // .pptx files are ZIP archives (start with "PK"); legacy .ppt files are not
+      const isPptx = data.length > 4 && data[0] === 0x50 && data[1] === 0x4B;
+      const mimeType = isPptx ?
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation' :
+        'application/vnd.ms-powerpoint';
 
-      if (extension === '.pptx') {
+      if (isPptx) {
         try {
-          const text = data.toString('utf8');
-          const textMatches = text.match(/<a:t[^>]*>([^<]+)<\/a:t>/g);
-          if (textMatches && textMatches.length > 0) {
-            const extractedText = textMatches
-              .map(match => match.replace(/<[^>]*>/g, ''))
-              .join(' ')
-              .trim();
+          const slides = await this.extractPptxSlides(data);
+          const extractedText = slides
+            .map((text, i) => `=== SLIDE ${i + 1} ===\n${text}`)
+            .join('\n\n')
+            .trim();
 
-            if (extractedText.length > 0) {
-              return {
-                text: extractedText,
-                metadata: {
-                  processed_with: 'xml_extraction',
-                  slides_detected: textMatches.length,
-                  presentation_type: 'pptx'
-                }
-              };
-            }
+          if (slides.some(text => text.length > 0)) {
+            return {
+              text: extractedText,
+              metadata: {
+                processed_with: 'xml_extraction',
+                slides_detected: slides.length,
+                presentation_type: 'pptx'
+              }
+            };
           }
         } catch (xmlError) {
           console.warn('PowerPoint XML extraction failed, using AI:', xmlError.message);
@@ -835,7 +870,7 @@ class UniversalDocumentProcessor {
         text: await this.processWithAIBuffer(data, mimeType),
         metadata: {
           processed_with: 'ai',
-          presentation_type: extension.substring(1)
+          presentation_type: isPptx ? 'pptx' : 'ppt'
         }
       };
     } catch (error) {
@@ -848,6 +883,27 @@ class UniversalDocumentProcessor {
         }
       };
     }
+  }
+
+  // Returns the text of each slide in order, one paragraph per line
+  async extractPptxSlides(data) {
+    const zip = await JSZip.loadAsync(data);
+    const slideFiles = Object.keys(zip.files)
+      .filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+      .sort((a, b) => parseInt(a.match(/\d+/)[0], 10) - parseInt(b.match(/\d+/)[0], 10));
+
+    const slides = [];
+    for (const name of slideFiles) {
+      const xml = await zip.files[name].async('string');
+      const $ = cheerio.load(xml, { xml: true });
+      const paragraphs = [];
+      $('a\\:p').each((i, p) => {
+        const line = $(p).find('a\\:t').map((j, t) => $(t).text()).get().join('');
+        if (line.trim()) paragraphs.push(line);
+      });
+      slides.push(paragraphs.join('\n'));
+    }
+    return slides;
   }
 
   async processExcel(filePath, buffer) {
@@ -1029,7 +1085,7 @@ class UniversalDocumentProcessor {
 
   async processSVG(filePath, buffer) {
     const svgContent = buffer ? buffer.toString() : fs.readFileSync(filePath, 'utf8');
-    const $ = cheerio.load(svgContent, { xmlMode: true });
+    const $ = cheerio.load(svgContent, { xml: true });
 
     let text = '';
     $('text, tspan').each((i, elem) => {
