@@ -6,7 +6,7 @@
 [![npm version](https://badge.fury.io/js/@iditechs%2Fdocument-photo-to-text-ai.svg)](https://badge.fury.io/js/@iditechs%2Fdocument-photo-to-text-ai)
 [![npm downloads](https://img.shields.io/npm/dm/@iditechs/document-photo-to-text-ai.svg)](https://www.npmjs.com/package/@iditechs/document-photo-to-text-ai)
 
-A powerful Node.js library for extracting text from various document formats using AI-powered OCR and specialized parsers. Supports multiple AI providers: **Google Gemini**, **OpenAI**, and **Anthropic Claude**.
+A powerful Node.js library for extracting text from various document formats using AI-powered OCR and specialized parsers. Supports multiple AI providers: **Google Gemini**, **OpenAI**, **Anthropic Claude**, and **OpenRouter** (hundreds of models with one API key).
 
 Handles PDFs, images, Word documents, Excel spreadsheets, CSV files, HTML pages, YouTube videos, and 40+ formats total.
 
@@ -14,7 +14,7 @@ Handles PDFs, images, Word documents, Excel spreadsheets, CSV files, HTML pages,
 
 ## Features
 
-- **Multi-Provider AI** — Choose your preferred AI provider: Gemini, OpenAI, Anthropic Claude, or bring your own
+- **Multi-Provider AI** — Choose your preferred AI provider: Gemini, OpenAI, Anthropic Claude, OpenRouter, or bring your own
 - **42 Supported Formats** — PDFs, images, Word, Excel, PowerPoint, CSV, HTML, JSON, XML, YAML, code files, and more
 - **AI-Powered OCR** — Uses AI vision models for accurate text extraction from images and scanned documents
 - **Works Without AI** — Text-based formats (TXT, JSON, CSV, DOCX, XLSX, etc.) work without any AI provider
@@ -41,6 +41,8 @@ npm install openai
 
 # For Anthropic Claude
 npm install @anthropic-ai/sdk
+
+# For OpenRouter: nothing to install (uses the built-in fetch)
 ```
 
 > **No AI SDK needed** if you only process text-based formats like TXT, JSON, CSV, DOCX, XLSX, HTML, XML, code files, etc.
@@ -70,6 +72,15 @@ const processor = new UniversalDocumentProcessor({
   provider: 'anthropic',
   apiKey: 'YOUR_ANTHROPIC_API_KEY',
   model: 'claude-sonnet-4-20250514' // optional, default
+});
+
+// OpenRouter — any vision model from https://openrouter.ai/models
+const processor = new UniversalDocumentProcessor({
+  provider: 'openrouter',
+  apiKey: 'YOUR_OPENROUTER_API_KEY',
+  model: 'google/gemini-2.5-flash', // optional, default
+  siteUrl: 'https://your-site.com', // optional, sent as HTTP-Referer
+  appName: 'Your App'               // optional, sent as X-Title
 });
 
 // No AI — text extraction only (PDF text, DOCX, Excel, CSV, etc.)
@@ -160,6 +171,7 @@ const processor = new UniversalDocumentProcessor({
 | `{ provider: 'gemini', apiKey, model? }` | Google Gemini |
 | `{ provider: 'openai', apiKey, model?, baseURL? }` | OpenAI / Azure OpenAI |
 | `{ provider: 'anthropic', apiKey, model? }` | Anthropic Claude |
+| `{ provider: 'openrouter', apiKey, model?, baseURL?, siteUrl?, appName? }` | OpenRouter (any model) |
 | `{ provider: Function }` | Custom AI function |
 | `Function` | Custom AI function (shorthand) |
 | `string` | Google API key (v1.x backward compat) |
@@ -265,7 +277,7 @@ const processor = new UniversalDocumentProcessor({
 ## Requirements
 
 - Node.js >= 18.0.0
-- At least one AI provider SDK installed (only for image OCR / vision features)
+- At least one AI provider SDK installed, or an OpenRouter API key (only for image OCR / vision features)
 
 ## License
 

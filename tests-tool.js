@@ -42,6 +42,9 @@ const testUrls = [
 ];
 
 function resolveProviderConfig() {
+  if (process.env.OPENROUTER_API_KEY) {
+    return { provider: 'openrouter', apiKey: process.env.OPENROUTER_API_KEY, model: process.env.OPENROUTER_MODEL };
+  }
   if (process.env.OPENAI_API_KEY) {
     return { provider: 'openai', apiKey: process.env.OPENAI_API_KEY };
   }
@@ -214,6 +217,18 @@ async function runConstructorTests() {
     passed++;
   } catch (error) {
     console.log(`  FAIL Object config anthropic: ${error.message}`);
+    failed++;
+  }
+
+  // Test 5b: Object config with OpenRouter
+  try {
+    const p = new UniversalDocumentProcessor({ provider: 'openrouter', apiKey: 'fake-key' });
+    const provider = await p._getAIProvider();
+    if (provider.name !== 'openrouter') throw new Error(`expected openrouter, got ${provider.name}`);
+    console.log(`  PASS Object config (openrouter)`);
+    passed++;
+  } catch (error) {
+    console.log(`  FAIL Object config openrouter: ${error.message}`);
     failed++;
   }
 

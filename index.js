@@ -119,15 +119,59 @@ async function createAIProvider(config) {
       };
     }
 
+    case 'openrouter': {
+      if (!apiKey) {
+        throw new Error('OpenRouter provider requires an apiKey. Get one at https://openrouter.ai/keys');
+      }
+      const endpoint = `${(baseURL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '')}/chat/completions`;
+      const modelName = model || 'google/gemini-2.5-flash';
+      const headers = {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        ...(config.siteUrl && { 'HTTP-Referer': config.siteUrl }),
+        ...(config.appName && { 'X-Title': config.appName })
+      };
+      return {
+        name: 'openrouter',
+        async generateContent(prompt, inlineData) {
+          const content = [{ type: 'text', text: prompt }];
+          if (inlineData) {
+            const mt = inlineData.mimeType.toLowerCase();
+            const dataUrl = `data:${mt};base64,${inlineData.data}`;
+            if (mt.startsWith('image/')) {
+              content.push({ type: 'image_url', image_url: { url: dataUrl } });
+            } else {
+              const ext = mime.extension(mt) || 'bin';
+              content.push({ type: 'file', file: { filename: `document.${ext}`, file_data: dataUrl } });
+            }
+          }
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              model: modelName,
+              messages: [{ role: 'user', content }]
+            })
+          });
+          const body = await res.json().catch(() => null);
+          if (!res.ok || body?.error) {
+            const msg = body?.error?.message || res.statusText;
+            throw new Error(`OpenRouter request failed (${res.status}): ${msg}`);
+          }
+          return body?.choices?.[0]?.message?.content || '';
+        }
+      };
+    }
+
     default:
-      throw new Error(`Unknown AI provider: "${provider}". Supported: gemini, openai, anthropic, or pass a custom function.`);
+      throw new Error(`Unknown AI provider: "${provider}". Supported: gemini, openai, anthropic, openrouter, or pass a custom function.`);
   }
 }
 
 class UniversalDocumentProcessor {
   /**
    * @param {string|object|function} [config] - Google API key (string, backward compat), provider config object, or custom AI function
-   *   Config object: { provider: 'gemini'|'openai'|'anthropic'|Function, apiKey: string, model?: string, baseURL?: string }
+   *   Config object: { provider: 'gemini'|'openai'|'anthropic'|'openrouter'|Function, apiKey: string, model?: string, baseURL?: string, siteUrl?: string, appName?: string }
    * @param {object} [options] - Processing options: maxFileSize, timeout, cacheEnabled
    */
   constructor(config, options = {}) {

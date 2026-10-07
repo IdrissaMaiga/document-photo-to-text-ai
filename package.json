@@ -1,7 +1,7 @@
 {
   "name": "@iditechs/document-photo-to-text-ai",
-  "version": "2.0.1",
-  "description": "A universal document processor that extracts text from various file formats including PDFs, images, documents, and more. Supports multiple AI providers: Gemini, OpenAI, Anthropic Claude",
+  "version": "2.1.0",
+  "description": "A universal document processor that extracts text from various file formats including PDFs, images, documents, and more. Supports multiple AI providers: Gemini, OpenAI, Anthropic Claude, OpenRouter",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -27,7 +27,8 @@
     "anthropic",
     "claude",
     "gpt-4o",
-    "multi-provider"
+    "multi-provider",
+    "openrouter"
   ],
   "author": "Idriss Maiga <idrissa@iditechs.com>",
   "license": "MIT",
