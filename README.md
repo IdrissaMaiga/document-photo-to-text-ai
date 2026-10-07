@@ -3,12 +3,14 @@
 ![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=nodedotjs&logoColor=white)
 ![npm](https://img.shields.io/badge/npm-CB3837?style=flat-square&logo=npm&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
-[![npm version](https://badge.fury.io/js/document-photo-to-text-ai.svg)](https://badge.fury.io/js/document-photo-to-text-ai)
-[![npm downloads](https://img.shields.io/npm/dm/document-photo-to-text-ai.svg)](https://www.npmjs.com/package/document-photo-to-text-ai)
+[![npm version](https://badge.fury.io/js/@iditechs%2Fdocument-photo-to-text-ai.svg)](https://badge.fury.io/js/@iditechs%2Fdocument-photo-to-text-ai)
+[![npm downloads](https://img.shields.io/npm/dm/@iditechs/document-photo-to-text-ai.svg)](https://www.npmjs.com/package/@iditechs/document-photo-to-text-ai)
 
 A powerful Node.js library for extracting text from various document formats using AI-powered OCR and specialized parsers. Supports multiple AI providers: **Google Gemini**, **OpenAI**, and **Anthropic Claude**.
 
 Handles PDFs, images, Word documents, Excel spreadsheets, CSV files, HTML pages, YouTube videos, and 40+ formats total.
+
+> **Note:** This package moved from `document-photo-to-text-ai` to `@iditechs/document-photo-to-text-ai`. The old unscoped package is no longer maintained.
 
 ## Features
 
@@ -25,7 +27,7 @@ Handles PDFs, images, Word documents, Excel spreadsheets, CSV files, HTML pages,
 ## Installation
 
 ```bash
-npm install document-photo-to-text-ai
+npm install @iditechs/document-photo-to-text-ai
 ```
 
 Then install the AI provider SDK you want to use (only needed for image/OCR features):
@@ -46,7 +48,7 @@ npm install @anthropic-ai/sdk
 ## Quick Start
 
 ```javascript
-import UniversalDocumentProcessor from 'document-photo-to-text-ai';
+import UniversalDocumentProcessor from '@iditechs/document-photo-to-text-ai';
 
 // === Choose your AI provider ===
 
