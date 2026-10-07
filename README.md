@@ -71,7 +71,7 @@ const processor = new UniversalDocumentProcessor({
 const processor = new UniversalDocumentProcessor({
   provider: 'anthropic',
   apiKey: 'YOUR_ANTHROPIC_API_KEY',
-  model: 'claude-sonnet-4-20250514' // optional, default
+  model: 'claude-sonnet-5-5' // optional, default
 });
 
 // OpenRouter — any vision model from https://openrouter.ai/models

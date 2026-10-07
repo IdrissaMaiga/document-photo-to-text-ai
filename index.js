@@ -16,6 +16,17 @@ import * as cheerio from 'cheerio';
 import ytdl from 'ytdl-core';
 import { getSubtitles } from 'youtube-captions-scraper';
 
+// Builds an OpenAI-style content part: images as image_url, everything else (PDF, etc.) as a file part
+function toOpenAIContentPart(inlineData) {
+  const mt = inlineData.mimeType.toLowerCase();
+  const dataUrl = `data:${mt};base64,${inlineData.data}`;
+  if (mt.startsWith('image/')) {
+    return { type: 'image_url', image_url: { url: dataUrl } };
+  }
+  const ext = mime.extension(mt) || 'bin';
+  return { type: 'file', file: { filename: `document.${ext}`, file_data: dataUrl } };
+}
+
 async function createAIProvider(config) {
   if (!config) return null;
 
@@ -64,16 +75,13 @@ async function createAIProvider(config) {
         async generateContent(prompt, inlineData) {
           const content = [{ type: 'text', text: prompt }];
           if (inlineData) {
-            content.push({
-              type: 'image_url',
-              image_url: { url: `data:${inlineData.mimeType};base64,${inlineData.data}` }
-            });
+            content.push(toOpenAIContentPart(inlineData));
           }
           const result = await client.chat.completions.create({
             model: modelName,
             messages: [{ role: 'user', content }]
           });
-          return result.choices[0].message.content;
+          return result.choices?.[0]?.message?.content || '';
         }
       };
     }
@@ -87,7 +95,7 @@ async function createAIProvider(config) {
         throw new Error('Anthropic provider requires "@anthropic-ai/sdk". Install it with: npm install @anthropic-ai/sdk');
       }
       const client = new Anthropic({ apiKey });
-      const modelName = model || 'claude-sonnet-4-20250514';
+      const modelName = model || 'claude-sonnet-5-5';
       return {
         name: 'anthropic',
         async generateContent(prompt, inlineData) {
@@ -114,7 +122,7 @@ async function createAIProvider(config) {
             max_tokens: 4096,
             messages: [{ role: 'user', content }]
           });
-          return result.content[0].text;
+          return result.content.filter(block => block.type === 'text').map(block => block.text).join('');
         }
       };
     }
@@ -136,14 +144,7 @@ async function createAIProvider(config) {
         async generateContent(prompt, inlineData) {
           const content = [{ type: 'text', text: prompt }];
           if (inlineData) {
-            const mt = inlineData.mimeType.toLowerCase();
-            const dataUrl = `data:${mt};base64,${inlineData.data}`;
-            if (mt.startsWith('image/')) {
-              content.push({ type: 'image_url', image_url: { url: dataUrl } });
-            } else {
-              const ext = mime.extension(mt) || 'bin';
-              content.push({ type: 'file', file: { filename: `document.${ext}`, file_data: dataUrl } });
-            }
+            content.push(toOpenAIContentPart(inlineData));
           }
           const res = await fetch(endpoint, {
             method: 'POST',
@@ -319,7 +320,7 @@ class UniversalDocumentProcessor {
 
       const fileExtension = filename.includes('.') ?
         filename.split('.').pop().toLowerCase() :
-        'unknown';
+        this.getExtensionFromMimeType(mimetype);
 
       if (buffer.length > this.options.maxFileSize) {
         throw new Error(`File too large: ${buffer.length} bytes (max: ${this.options.maxFileSize})`);
@@ -373,8 +374,8 @@ class UniversalDocumentProcessor {
       const sanitizeText = (text) => {
         if (!text || typeof text !== 'string') return '';
         return text
-          .replace(/ /g, '')
-          .replace(/[---]/g, '')
+          .replace(/\x00/g, '')
+          .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '')
           .trim();
       };
 
@@ -520,7 +521,7 @@ class UniversalDocumentProcessor {
     };
   }
 
-  async processURL(url) {
+  async processURL(url, redirectsLeft = 5) {
     return new Promise((resolve, reject) => {
       try {
         const urlObj = new URL(url);
@@ -538,6 +539,23 @@ class UniversalDocumentProcessor {
         };
 
         const req = client.request(options, (res) => {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            res.resume();
+            if (redirectsLeft <= 0) {
+              reject(new Error('Too many redirects'));
+              return;
+            }
+            const nextUrl = new URL(res.headers.location, url).href;
+            resolve(this.isYouTubeURL(nextUrl) ? this.processYouTube(nextUrl) : this.processURL(nextUrl, redirectsLeft - 1));
+            return;
+          }
+
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            res.resume();
+            reject(new Error(`Request failed with status ${res.statusCode}`));
+            return;
+          }
+
           const chunks = [];
           let totalSize = 0;
 
@@ -634,35 +652,39 @@ class UniversalDocumentProcessor {
         platform: 'youtube'
       };
 
+      let infoError = null;
       try {
         const info = await ytdl.getInfo(videoId);
         metadata.title = info.videoDetails.title;
         metadata.description = info.videoDetails.description;
         metadata.duration = info.videoDetails.lengthSeconds;
         metadata.view_count = info.videoDetails.viewCount;
-
-        try {
-          const captions = await getSubtitles({
-            videoID: videoId,
-            lang: 'en'
-          });
-
-          if (captions && captions.length > 0) {
-            extractedText = captions.map(caption => caption.text).join(' ');
-          }
-        } catch (captionError) {
-          console.warn('Could not extract captions:', captionError.message);
-        }
-
-        if (!extractedText && metadata.description) {
-          extractedText = `Title: ${metadata.title}\n\nDescription: ${metadata.description}`;
-        }
-
       } catch (error) {
         console.warn('Could not get video info:', error.message);
-        extractedText = "";
+        infoError = error;
+      }
+
+      // Captions are fetched separately so they still work when ytdl-core breaks
+      try {
+        const captions = await getSubtitles({
+          videoID: videoId,
+          lang: 'en'
+        });
+
+        if (captions && captions.length > 0) {
+          extractedText = captions.map(caption => caption.text).join(' ');
+        }
+      } catch (captionError) {
+        console.warn('Could not extract captions:', captionError.message);
+      }
+
+      if (!extractedText && metadata.description) {
+        extractedText = `Title: ${metadata.title}\n\nDescription: ${metadata.description}`;
+      }
+
+      if (!extractedText && infoError) {
         metadata.extraction_status = 'failed';
-        metadata.extraction_error = error.message;
+        metadata.extraction_error = infoError.message;
       }
 
       return {
@@ -956,7 +978,7 @@ class UniversalDocumentProcessor {
 
   async processImage(filePath, buffer) {
     const imageBuffer = buffer || fs.readFileSync(filePath);
-    const mimeType = (filePath && mime.lookup(filePath)) || 'image/jpeg';
+    const mimeType = this.detectImageMimeType(imageBuffer) || (filePath && mime.lookup(filePath)) || 'image/jpeg';
 
     return {
       text: await this.processImageBuffer(imageBuffer, mimeType),
@@ -985,6 +1007,19 @@ class UniversalDocumentProcessor {
     } catch (error) {
       return "";
     }
+  }
+
+  // Detects the real image type from magic bytes so the AI provider gets a matching media type
+  detectImageMimeType(buffer) {
+    if (!buffer || buffer.length < 12) return null;
+    if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) return 'image/jpeg';
+    if (buffer.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))) return 'image/png';
+    if (buffer.slice(0, 4).toString('ascii') === 'GIF8') return 'image/gif';
+    if (buffer.slice(0, 4).toString('ascii') === 'RIFF' && buffer.slice(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+    if (buffer[0] === 0x42 && buffer[1] === 0x4D) return 'image/bmp';
+    const tiffHeader = buffer.slice(0, 4).toString('hex');
+    if (tiffHeader === '49492a00' || tiffHeader === '4d4d002a') return 'image/tiff';
+    return null;
   }
 
   isLikelyTestImage(buffer) {
